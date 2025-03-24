@@ -4,9 +4,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { AppModule } from './app.module';
 import { HttpsOptions } from '@nestjs/common/interfaces/external/https-options.interface';
+import * as cookieParser from 'cookie-parser';
 
 async function bootstrap(): Promise<void> {
-  const PORT = Number(process.env.PORT) || 3000;
+  const PORT = Number(process.env.PORT) || 4000;
   const useSSL = process.env.USE_SSL === 'true';
   const isRender = process.env.RENDER_ENV === 'true';
 
@@ -24,6 +25,7 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { httpsOptions });
 
   app.enableCors({ origin: '*' });
+  app.use(cookieParser());
   app.setGlobalPrefix('api');
 
   const config = new DocumentBuilder()

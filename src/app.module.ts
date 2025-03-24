@@ -6,6 +6,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { CronTasksService } from './shared/services/cron-tasks/cron-tasks.service';
+import { RolesModule } from './roles/roles.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { CronTasksService } from './shared/services/cron-tasks/cron-tasks.servic
     AuthModule,
     MailModule,
     ScheduleModule.forRoot(),
+    RolesModule,
   ],
   providers: [CronTasksService],
 })

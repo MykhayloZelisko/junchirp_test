@@ -8,74 +8,49 @@ datasource db {
 }
 
 model User {
-  id                  String               @id @default(uuid())
-  email               String               @unique
-  avatarUrl           String?              @map("avatar_url")
-  password            String
-  createdAt           DateTime             @default(now()) @map("created_at")
-  isVerified          Boolean              @default(false) @map("is_verified")
-  role                Role                 @default(USER)
-  firstName           String               @map("first_name")
-  lastName            String               @map("last_name")
-  LogEvents           LogEvent[]
-  VerificationAttempt VerificationAttempt?
-  VerificationCode    VerificationCode?
+  id         String   @id @default(dbgenerated("gen_random_uuid()"))
+  email      String   @unique
+  avatarUrl  String?  @map("avatar_url")
+  password   String
+  createdAt  DateTime @default(now()) @map("created_at")
+  isVerified Boolean  @default(false) @map("is_verified")
+  firstName  String   @map("first_name")
+  lastName   String   @map("last_name")
+
+  roleId               String                @map("role_id")
+  role                 Role                  @relation(fields: [roleId], references: [id])
+  verificationToken    VerificationToken?
+  verificationAttempts VerificationAttempt[]
 
   @@map("users")
 }
 
-model VerificationCode {
-  id        String   @id @default(uuid())
-  code      String
-  expiresAt DateTime @map("expires_at")
-  userId    String   @unique @map("user_id")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+model Role {
+  id       String @id @default(dbgenerated("gen_random_uuid()"))
+  roleName String @unique @map("role_name")
 
-  @@map("verification_codes")
+  users User[]
+
+  @@map("roles")
+}
+
+model VerificationToken {
+  id        String   @id @default(dbgenerated("gen_random_uuid()"))
+  token     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  userId String @unique @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("verification_tokens")
 }
 
 model VerificationAttempt {
-  id            String   @id @default(uuid())
-  userId        String   @unique @map("user_id")
-  updatedAt     DateTime @default(now()) @map("updated_at")
-  attemptsCount Int      @default(1) @map("attempts_count")
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("verification_attempts")
-}
-
-model BlockedEmail {
-  id        String   @id @default(uuid())
-  email     String   @unique
+  id        String   @id @default(dbgenerated("gen_random_uuid()"))
   createdAt DateTime @default(now()) @map("created_at")
 
-  @@map("blocked_emails")
-}
+  userId String @unique @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-model LogEvent {
-  id        String @id @default(uuid())
-  eventType String @map("event_type")
-  userId    String @map("user_id")
-  details   String
-  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("log_events")
-}
-
-model Project {
-  id String @id @default(uuid())
-
-  @@map("projects")
-}
-
-model Team {
-  id String @id @default(uuid())
-
-  @@map("teams")
-}
-
-enum Role {
-  USER
-  ADMIN
-  MANAGER
+  @@map("verification_attempts")
 }
