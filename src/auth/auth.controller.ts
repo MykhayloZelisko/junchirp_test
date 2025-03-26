@@ -2,10 +2,12 @@ import {
   Body,
   Controller,
   HttpCode,
+  HttpStatus,
   Post,
   Req,
   Res,
-  UseGuards, UsePipes,
+  UseGuards,
+  UsePipes,
 } from '@nestjs/common';
 import {
   ApiBody,
@@ -14,6 +16,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiTags,
+  ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { Request, Response } from 'express';
@@ -24,6 +27,8 @@ import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto } from './dto/auth.response-dto';
 import { LocalAuthGuard } from './guards/local-auth/local-auth.guard';
 import { TokenResponseDto } from './dto/token.response-dto';
+import { Auth } from './decorators/auth.decorator';
+import { MessageResponseDto } from '../users/dto/message.response-dto';
 
 @ApiTags('Authorization')
 @Controller('auth')
@@ -33,9 +38,12 @@ export class AuthController {
   @ApiOperation({ summary: 'Login' })
   @ApiOkResponse({ type: AuthResponseDto })
   @ApiUnauthorizedResponse({ description: 'Email or password is incorrect' })
+  @ApiTooManyRequestsResponse({
+    description: 'Too many failed attempts. Please try again later',
+  })
   @ApiBody({ type: LoginDto })
   @UseGuards(LocalAuthGuard)
-  @HttpCode(200)
+  @HttpCode(HttpStatus.OK)
   @Post('login')
   public async login(
     @Req() req: Request,
@@ -59,11 +67,24 @@ export class AuthController {
   @ApiOperation({ summary: 'Refresh token' })
   @ApiOkResponse({ type: TokenResponseDto })
   @ApiUnauthorizedResponse({ description: 'Invalid or expired refresh token' })
-  @HttpCode(200)
+  @HttpCode(HttpStatus.OK)
   @Post('refresh-token')
   public async refreshToken(
     @Req() req: Request,
   ): Promise<{ accessToken: string }> {
     return this.authService.regenerateAccessToken(req);
+  }
+
+  @Auth()
+  @ApiOperation({ summary: 'Logout' })
+  @ApiOkResponse({ type: MessageResponseDto })
+  @ApiUnauthorizedResponse({ description: 'Token is invalid' })
+  @HttpCode(HttpStatus.OK)
+  @Post('logout')
+  public async logout(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<MessageResponseDto> {
+    return this.authService.logout(req, res);
   }
 }

@@ -1,10 +1,10 @@
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
-import { User, VerificationToken } from '@prisma/client';
+import { VerificationToken } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UserWithPasswordResponseDto } from './dto/user-with-password.response-dto';
@@ -14,6 +14,8 @@ import { MessageResponseDto } from './dto/message.response-dto';
 import { MailService } from '../mail/mail.service';
 import { UserResponseDto } from './dto/user.response-dto';
 import { ConfirmEmailDto } from './dto/confirm-email.dto';
+import { TooManyRequestsException } from '../shared/exceptions/too-many-requests.exception';
+import { RolesService } from '../roles/roles.service';
 
 @Injectable()
 export class UsersService {
@@ -22,9 +24,12 @@ export class UsersService {
     private jwtService: JwtService,
     private configService: ConfigService,
     private mailService: MailService,
+    private rolesService: RolesService,
   ) {}
 
   public async createUser(createUserDto: CreateUserDto): Promise<void> {
+    const role = await this.rolesService.findOrCreateRole('user');
+
     await this.prisma.user.create({
       data: {
         firstName: createUserDto.firstName,
@@ -32,7 +37,7 @@ export class UsersService {
         email: createUserDto.email,
         password: createUserDto.password,
         role: {
-          connect: { roleName: 'user' },
+          connect: { id: role.id },
         },
       },
     });
@@ -43,15 +48,22 @@ export class UsersService {
   ): Promise<UserWithPasswordResponseDto | null> {
     return this.prisma.user.findUnique({
       where: { email },
-      include: { role: true },
+      include: { role: true, educations: true, socials: true },
     });
   }
 
-  public async getUserById(id: string): Promise<User | null> {
-    return this.prisma.user.findUnique({
+  public async getUserById(id: string): Promise<UserResponseDto> {
+    const user = await this.prisma.user.findUnique({
       where: { id },
-      include: { role: true },
+      include: { role: true, educations: true, socials: true },
     });
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid token: user not found');
+    }
+
+    const { password, ...userWithoutPassword } = user;
+    return userWithoutPassword;
   }
 
   public async createVerificationUrl(
@@ -78,7 +90,7 @@ export class UsersService {
         : new Date();
       newAvailableTime.setHours(newAvailableTime.getHours() + 1);
 
-      throw new ForbiddenException(
+      throw new TooManyRequestsException(
         `You have used up all your attempts. The next available attempt will be at ${newAvailableTime}`,
       );
     }

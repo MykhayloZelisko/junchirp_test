@@ -15,6 +15,10 @@ import { AuthResponseDto } from './dto/auth.response-dto';
 import { UserWithPasswordResponseDto } from '../users/dto/user-with-password.response-dto';
 import { CreateUserDto } from '../users/dto/create-user.dto';
 import { MailService } from '../mail/mail.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { TooManyRequestsException } from '../shared/exceptions/too-many-requests.exception';
+import { RedisService } from '../redis/redis.service';
+import { MessageResponseDto } from '../users/dto/message.response-dto';
 
 @Injectable()
 export class AuthService {
@@ -27,21 +31,98 @@ export class AuthService {
     private mailService: MailService,
     private configService: ConfigService,
     private jwtService: JwtService,
+    private prisma: PrismaService,
+    private redisService: RedisService,
   ) {}
 
   public async validateUser(loginDto: LoginDto): Promise<UserResponseDto> {
     const user = await this.usersService.getUserByEmail(loginDto.email);
-    if (user) {
-      const passwordEquals = await bcrypt.compare(
-        loginDto.password,
-        user.password,
-      );
-      if (passwordEquals) {
-        const { password, ...userWithoutPassword } = user;
-        return userWithoutPassword;
+
+    if (!user) {
+      throw new UnauthorizedException('Email or password is incorrect');
+    }
+
+    const loginAttempt = await this.prisma.loginAttempt.findUnique({
+      where: { userId: user.id },
+    });
+
+    if (loginAttempt) {
+      const now = new Date();
+      if (loginAttempt.blockedUntil && now < loginAttempt.blockedUntil) {
+        throw new TooManyRequestsException(
+          'Too many failed attempts. Please try again later',
+          loginAttempt.attemptsCount,
+        );
       }
     }
-    throw new UnauthorizedException('Email or password is incorrect');
+
+    const passwordEquals = await bcrypt.compare(
+      loginDto.password,
+      user.password,
+    );
+    if (passwordEquals) {
+      if (loginAttempt) {
+        await this.prisma.loginAttempt.delete({
+          where: { userId: user.id },
+        });
+      }
+      const { password, ...userWithoutPassword } = user;
+      return userWithoutPassword;
+    } else {
+      if (loginAttempt) {
+        const updateData: {
+          attemptsCount: number;
+          blockedUntil?: Date;
+        } = {
+          attemptsCount: loginAttempt.attemptsCount + 1,
+        };
+
+        if (loginAttempt.attemptsCount + 1 >= 5 && !loginAttempt.blockedUntil) {
+          updateData.blockedUntil = new Date(
+            new Date().getTime() + 15 * 60 * 1000,
+          );
+        }
+
+        if (
+          loginAttempt.attemptsCount + 1 >= 10 &&
+          !loginAttempt.blockedUntil
+        ) {
+          updateData.blockedUntil = new Date(
+            new Date().getTime() + 60 * 60 * 1000,
+          );
+        }
+
+        if (
+          loginAttempt.attemptsCount + 1 >= 15 &&
+          !loginAttempt.blockedUntil
+        ) {
+          updateData.blockedUntil = new Date(
+            new Date().getTime() + 365 * 24 * 60 * 60 * 1000,
+          );
+        }
+
+        await this.prisma.loginAttempt.update({
+          where: { userId: user.id },
+          data: updateData,
+        });
+
+        if ([5, 10, 15].includes(updateData.attemptsCount)) {
+          throw new TooManyRequestsException(
+            'Too many failed attempts. Please try again later',
+            updateData.attemptsCount,
+          );
+        }
+      } else {
+        await this.prisma.loginAttempt.create({
+          data: {
+            userId: user.id,
+            attemptsCount: 1,
+          },
+        });
+      }
+
+      throw new UnauthorizedException('Email or password is incorrect');
+    }
   }
 
   public login(req: Request, res: Response): AuthResponseDto {
@@ -163,16 +244,28 @@ export class AuthService {
     return { accessToken: newAccessToken };
   }
 
-  // public removeRefreshTokenFromResponse(res: Response): void {
-  //   const expiresIn = new Date();
-  //   expiresIn.setDate(expiresIn.getDate() + this.EXPIRE_DAY_REFRESH_TOKEN);
-  //
-  //   res.cookie(this.REFRESH_TOKEN_NAME, '', {
-  //     httpOnly: true,
-  //     domain: this.configService.get('SERVER_DOMAIN'),
-  //     expires: new Date(0),
-  //     secure: true,
-  //     sameSite: 'none',
-  //   });
-  // }
+  public async logout(
+    req: Request,
+    res: Response,
+  ): Promise<MessageResponseDto> {
+    const accessToken = req.headers.authorization?.split(' ')[1];
+
+    if (!accessToken) {
+      throw new UnauthorizedException('Token is missing');
+    }
+
+    try {
+      const { exp } = this.jwtService.decode(accessToken) as { exp: number };
+      const expiresIn = exp - Math.floor(Date.now() / 1000);
+
+      if (expiresIn > 0) {
+        await this.redisService.addToBlacklist(accessToken, expiresIn);
+      }
+
+      res.clearCookie('refreshToken', { httpOnly: true, secure: true });
+      return { message: 'Logged out successfully' };
+    } catch (error) {
+      throw new UnauthorizedException(`Token is invalid: ${error}`);
+    }
+  }
 }
